@@ -923,9 +923,9 @@ bool LoadROM(const char* path, const char* sram, bool direct)
     CartIsDSi = (unitcode & 0x02) != 0;
 
     CartROM = new u8[CartROMSize];
-    memset(CartROM, 0, CartROMSize);
     fseek(f, 0, SEEK_SET);
     fread(CartROM, 1, len, f);
+    memset(CartROM+len, 0, CartROMSize-len);
 
     fclose(f);
     //CartROM = f;

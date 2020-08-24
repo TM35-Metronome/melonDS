@@ -20,6 +20,11 @@
 #include <time.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+#include <iostream>
+#include <charconv>
 
 #include <QApplication>
 #include <QMessageBox>
@@ -48,6 +53,7 @@
 #include "OSD.h"
 
 #include "NDS.h"
+#include "NDSCart.h"
 #include "GBACart.h"
 #ifdef OGLRENDERER_ENABLED
 #include "OpenGLSupport.h"
@@ -88,7 +94,6 @@ u32 micExtBufferWritePos;
 
 u32 micWavLength;
 s16* micWavBuffer;
-
 
 void audioCallback(void* data, Uint8* stream, int len)
 {
@@ -361,10 +366,47 @@ void EmuThread::run()
     double frameLimitError = 0.0;
     double lastMeasureTime = lastTime;
 
+    std::string lines{};
+    char buf[1024];
     char melontitle[100];
+
+    // Set stdin to be non blocking
+    fcntl(0, F_SETFL, fcntl(0, F_GETFL) | O_NONBLOCK);
 
     while (EmuRunning != 0)
     {
+        ssize_t r = read(0, buf, sizeof(buf));
+        if (r > 0) {
+            lines.append(buf, r);
+
+            auto start = lines.begin();
+            auto end = start;
+            for (;(end = std::find(end, lines.end(), '\n')) != lines.end(); end += 1, start = end) {
+                // Parse this format [<num>]=<hex2>+
+                auto lbracket = std::find(start, end, '[');
+                auto eql = std::find(start, end, '=');
+                if (lbracket != start || eql == end)
+                    continue;
+                if (*(eql-1) != ']')
+                    continue;
+
+                size_t offset;
+                if (auto [_, ec] = std::from_chars(&*(lbracket+1), &*(eql-1), offset); ec != std::errc())
+                    continue;
+                
+                for (auto hex = eql+1; (hex+2) <= end; hex += 2, offset += 1) {
+                    size_t byte;
+                    if (auto [_, ec] = std::from_chars(&*(hex), &*(hex+2), byte, 16); ec != std::errc())
+                        break;
+                    if (NDSCart::CartROMSize <= offset)
+                        break;
+                    NDSCart::CartROM[offset] = byte;
+                }
+            }
+
+            lines.erase(lines.begin(), start);
+        }
+
         Input::Process();
 
         if (Input::HotkeyPressed(HK_FastForwardToggle)) emit windowLimitFPSChange();
@@ -2083,7 +2125,6 @@ void emuStop()
 
     OSD::AddMessage(0xFFC040, "Shutdown");
 }
-
 
 
 int main(int argc, char** argv)
